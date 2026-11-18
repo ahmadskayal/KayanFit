@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<title>Kayan Fit</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#103F3C">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Kayan Fit">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="icons/icon-192.png">
+<meta name="robots" content="noindex,nofollow">
+<style>
+html,body{height:100%;margin:0}
+body{background:radial-gradient(circle at 50% 30%,#178E83 0%,#103F3C 45%,#071A19 100%);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;display:flex;align-items:center;justify-content:center;padding:24px;box-sizing:border-box}
+.box{width:100%;max-width:360px;background:#fff;border-radius:26px;padding:24px 20px;display:flex;flex-direction:column;gap:12px;box-shadow:0 20px 50px rgba(0,0,0,.3);text-align:center}
+.box img{width:min(230px,80%);margin:0 auto;display:block}
+h1{margin:0;font-size:20px;color:#103F3C}
+input[type=text],input[type=password]{width:100%;box-sizing:border-box;min-height:48px;border-radius:14px;border:1px solid #D6E3DF;background:#E6EEEC;padding:10px 12px;font-size:16px;direction:ltr;color:#103F3C}
+button{min-height:50px;border:0;border-radius:16px;background:linear-gradient(135deg,#0B2E2C,#103F3C 50%,#178E83);color:#fff;font-size:16px;font-weight:700}
+button:disabled{opacity:.6}
+label{display:flex;gap:8px;align-items:center;justify-content:center;font-size:14px;color:#5B6B65}
+.msg{min-height:20px;margin:0;color:#c0392b;font-weight:600;font-size:14px}
+</style>
+</head>
+<body>
+<form class="box" id="f" autocomplete="on">
+  <img src="icons/logo_full.png" alt="Kayan Fit">
+  <h1>تسجيل الدخول</h1>
+  <input type="text" id="u" name="username" autocomplete="username" autocapitalize="off" spellcheck="false" placeholder="اسم المستخدم" required>
+  <input type="password" id="p" name="password" autocomplete="current-password" placeholder="كلمة المرور" required>
+  <label><input type="checkbox" id="r" checked> تذكّرني على هذا الجهاز</label>
+  <button id="b" type="submit">دخول</button>
+  <p class="msg" id="m" role="status"></p>
+</form>
+<script>
+(function(){
+  // everything stays inside this function; only window.KF_SESSION and window.KF_AUTH reach the decrypted app
+  var ADMIN_PUB='BPHGDa3/14PXDIYMuoUAo9kyVeiuPg2DtLIfgWAKaZNJHmn9ARDkztsryDQb8kfWpsr7mPapYIm+IIEX+cTMTXo=',AUTH_REPO='ahmadskayal/KayanFit-auth',KEY='kf_site_login';
+  function b64(u8){var s='';for(var i=0;i<u8.length;i++)s+=String.fromCharCode(u8[i]);return btoa(s)}
+  function unb64(s){var r=atob(s),a=new Uint8Array(r.length);for(var i=0;i<r.length;i++)a[i]=r.charCodeAt(i);return a}
+  function hex(buf){return Array.prototype.map.call(new Uint8Array(buf),function(x){return('0'+x.toString(16)).slice(-2)}).join('')}
+  var TE=new TextEncoder(),TD=new TextDecoder();
+  var encP=null;
+  function enc(){if(!encP)encP=fetch('app.enc',{cache:'no-cache'}).then(function(r){if(!r.ok)throw new Error('download');return r.arrayBuffer()}).then(function(b){return new Uint8Array(b)});return encP}
+  // the login file of one user, from the public auth repo (cached for opening offline)
+  function entry(id){
+    var api='https://api.github.com/repos/'+AUTH_REPO+'/contents/u/'+id+'.json',raw='https://raw.githubusercontent.com/'+AUTH_REPO+'/main/u/'+id+'.json?t='+Date.now();
+    function get(u,h){return fetch(u,{cache:'no-store',headers:h||{}}).then(function(r){if(r.status===404)throw new Error('bad');if(!r.ok)throw new Error('net');return r.json()})}
+    return get(api,{'Accept':'application/vnd.github.raw+json'}).catch(function(e){if(e.message==='bad')throw e;return get(raw)})
+      .then(function(e){try{localStorage.setItem('kf_auth_'+id,JSON.stringify(e))}catch(x){}return e})
+      .catch(function(e){if(e.message==='bad')throw e;var c=null;try{c=JSON.parse(localStorage.getItem('kf_auth_'+id)||'null')}catch(x){}if(c)return c;throw new Error('download')});
+  }
+  function verify(pubB64,sigB64,msg){return crypto.subtle.importKey('raw',unb64(pubB64),{name:'ECDSA',namedCurve:'P-256'},false,['verify'])
+    .then(function(k){return crypto.subtle.verify({name:'ECDSA',hash:'SHA-256'},k,unb64(sigB64),TE.encode(msg))})}
+  // only a login file registered by the admin and signed by its own user is accepted
+  function checked(e,id){if(!e||e.v!==3||e.id!==id)return Promise.reject(new Error('bad'));
+    return verify(ADMIN_PUB,e.regSig,'kf-reg|'+e.id+'|'+e.role+'|'+e.pub+'|'+e.regTs).then(function(ok){if(!ok)throw new Error('bad');
+      return verify(e.pub,e.sig,'kf-ent|'+e.id+'|'+e.s+'|'+e.w+'|'+e.ts)}).then(function(ok){if(!ok)throw new Error('bad');return e})}
+  function aes(raw,data){return crypto.subtle.importKey('raw',raw,'AES-GCM',false,['decrypt']).then(function(k){return crypto.subtle.decrypt({name:'AES-GCM',iv:data.slice(0,12)},k,data.slice(12))})}
+  function unlock(id,kek){
+    var e;
+    return entry(id).then(function(x){return checked(x,id)}).then(function(x){e=x;return aes(kek,unb64(e.w))})
+      .then(function(pt){var s=JSON.parse(TD.decode(pt));
+        return enc().then(function(d){return aes(unb64(s.k),d)}).then(function(app){window.KF_SESSION=s;window.KF_AUTH={entry:e,adminPub:ADMIN_PUB,kek:b64(kek)};return TD.decode(app)})})
+      .then(function(html){document.open();document.write(html);document.close()});
+  }
+  if('serviceWorker' in navigator){navigator.serviceWorker.register('sw.js').catch(function(){})}
+  var saved=null;try{saved=JSON.parse(localStorage.getItem(KEY)||'null')}catch(e){}
+  if(saved&&saved.id&&saved.k){unlock(saved.id,unb64(saved.k)).catch(function(err){if(!(err&&err.message==='download')){try{localStorage.removeItem(KEY)}catch(e){}}})}
+  enc().catch(function(){});
+  document.getElementById('f').addEventListener('submit',function(ev){
+    ev.preventDefault();var name=document.getElementById('u').value.trim().toLowerCase(),p=document.getElementById('p').value,m=document.getElementById('m'),b=document.getElementById('b');
+    if(!name||!p)return;b.disabled=true;m.style.color='#5B6B65';m.textContent='جارٍ التحقق…';
+    var id,kek;
+    crypto.subtle.digest('SHA-256',TE.encode(name)).then(function(h){id=hex(h);return entry(id)}).then(function(e){return checked(e,id)})
+      .then(function(e){return crypto.subtle.importKey('raw',TE.encode(p),'PBKDF2',false,['deriveBits']).then(function(k){return crypto.subtle.deriveBits({name:'PBKDF2',hash:'SHA-256',salt:unb64(e.s),iterations:600000},k,256)})})
+      .then(function(bits){kek=new Uint8Array(bits);if(document.getElementById('r').checked){try{localStorage.setItem(KEY,JSON.stringify({id:id,k:b64(kek)}))}catch(e){}}return unlock(id,kek)})
+      .catch(function(e){try{localStorage.removeItem(KEY)}catch(x){}b.disabled=false;m.style.color='#c0392b';m.textContent=(e&&e.message==='download')?'تعذّر الاتصال، تحقق من الإنترنت':'اسم المستخدم أو كلمة المرور غير صحيح'});
+  });
+})();
+</script>
+</body>
+</html>
